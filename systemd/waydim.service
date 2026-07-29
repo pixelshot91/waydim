@@ -1,0 +1,10 @@
+[Unit]
+Description=Waydim hybrid brightness helper
+
+[Service]
+Type=simple
+ExecStart=/home/you/.local/bin/waydim show
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

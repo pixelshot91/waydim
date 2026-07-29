@@ -1,0 +1,3 @@
+# Put this in ~/.config/sway/config (or your DE's keybinding config)
+bindsym XF86MonBrightnessDown exec /home/you/.local/bin/waydim down 5%
+bindsym XF86MonBrightnessUp exec /home/you/.local/bin/waydim up 5%
