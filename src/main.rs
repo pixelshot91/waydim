@@ -12,6 +12,9 @@ const HW_MAX: u32 = 1000;
 /// Minimum software factor to avoid invalid zero-gamma
 const MIN_SOFTWARE_FACTOR: f32 = 0.01;
 
+/// The gamma relay binary to control software gamma; this tool is required and not configurable.
+const WL_GAMMA_RELAY: &str = "wl-gammarelay-rs";
+
 #[derive(Parser)]
 #[command(author, version, about = "Hybrid hardware + software dimmer (Wayland-compatible)")]
 struct Cli {
@@ -20,9 +23,6 @@ struct Cli {
     /// Backlight path to use (overrides autodetect), e.g. /sys/class/backlight/intel_backlight
     #[arg(short, long)]
     backlight: Option<PathBuf>,
-    /// Try to use this wl-gammactl binary name/path
-    #[arg(short = 'g', long, default_value = "wl-gammactl")]
-    wl_gammactl: String,
 }
 
 #[derive(Subcommand)]
@@ -83,37 +83,37 @@ fn write_u32(path: &Path, value: u32) -> Result<()> {
     Ok(())
 }
 
-/// Apply software brightness via wl-gammactl -c <factor>
+/// Apply software brightness via the wl-gammarelay daemon.
 /// factor: 1.0 is no change, <1.0 is darker.
-fn apply_software_gamma(wl_gammactl: &str, factor: f32) -> Result<()> {
+fn apply_software_gamma(factor: f32) -> Result<()> {
     // clamp factor to a sane non-zero value
     let factor = factor.max(MIN_SOFTWARE_FACTOR);
-    // Call wl-gammactl -c <factor>
-    let status = Command::new(wl_gammactl)
+    // Call wl-gammarelay-rs -c <factor>
+    let status = Command::new(WL_GAMMA_RELAY)
         .arg("-c")
         .arg(format!("{}", factor))
         .status()
-        .with_context(|| format!("failed to run {}", wl_gammactl))?;
+        .with_context(|| format!("failed to run {}", WL_GAMMA_RELAY))?;
     if !status.success() {
-        anyhow::bail!("{} exited with {}", wl_gammactl, status);
+        anyhow::bail!("{} exited with {}", WL_GAMMA_RELAY, status);
     }
     Ok(())
 }
 
-fn show_state(backlight: &Path, wl_gammactl: &str) -> Result<()> {
+fn show_state(backlight: &Path) -> Result<()> {
     let current = read_u32(&backlight.join("brightness"))?;
     let device_max = read_u32(&backlight.join("max_brightness"))?;
     // We don't store the software factor state; query none — best-effort show
     println!("backlight: {}", backlight.display());
     println!("device max_brightness: {}", device_max);
     println!("current hardware brightness: {}", current);
-    // There is no easy portable way to read the current wl-gammactl factor; just tell user how to inspect
-    println!("software gamma: controlled externally (wl-gammactl). To inspect, call wl-gammactl --help or check compositor state.");
+    // There is no easy portable way to read the current gamma factor from the relay; just tell user how to inspect
+    println!("software gamma: controlled by {} daemon; inspect the relay's logs or control interface.", WL_GAMMA_RELAY);
     println!("hardware clamp: [{}, {}] (raw units)", HW_MIN, HW_MAX);
     Ok(())
 }
 
-fn set_brightness(backlight: &Path, wl_gammactl: &str, target_percent: f32) -> Result<()> {
+fn set_brightness(backlight: &Path, target_percent: f32) -> Result<()> {
     let device_max = read_u32(&backlight.join("max_brightness"))?;
     let hw_upper = device_max.min(HW_MAX);
     let hw_lower = HW_MIN;
@@ -123,13 +123,13 @@ fn set_brightness(backlight: &Path, wl_gammactl: &str, target_percent: f32) -> R
     let desired_raw = desired_raw.max(0) as u32;
 
     if desired_raw == 0 {
-        // User wants "off" — set hardware to hw_lower and software factor to 0 (or MIN_SOFTWARE_FACTOR)
+        // User wants "off" — set hardware to hw_lower and software factor to near-zero
         write_u32(&backlight.join("brightness"), hw_lower)?;
         // set software gamma to near-zero
-        apply_software_gamma(wl_gammactl, 0.0)?;
+        apply_software_gamma(0.0)?;
         println!(
             "Requested 0: set hardware to {} and applied software gamma to 0 (via {}).",
-            hw_lower, wl_gammactl
+            hw_lower, WL_GAMMA_RELAY
         );
         return Ok(());
     }
@@ -138,7 +138,7 @@ fn set_brightness(backlight: &Path, wl_gammactl: &str, target_percent: f32) -> R
         // Hardware set to hw_lower, use software factor to reach desired_raw/hw_lower
         write_u32(&backlight.join("brightness"), hw_lower)?;
         let factor = (desired_raw as f32) / (hw_lower as f32);
-        apply_software_gamma(wl_gammactl, factor)?;
+        apply_software_gamma(factor)?;
         println!(
             "hardware set to {} (clamped); applied software gamma factor {:.3}",
             hw_lower, factor
@@ -148,7 +148,7 @@ fn set_brightness(backlight: &Path, wl_gammactl: &str, target_percent: f32) -> R
         let hw_value = desired_raw.min(hw_upper);
         write_u32(&backlight.join("brightness"), hw_value)?;
         // Reset software gamma to 1.0 (no software dim)
-        apply_software_gamma(wl_gammactl, 1.0)?;
+        apply_software_gamma(1.0)?;
         println!("hardware set to {}; software gamma reset to 1.0", hw_value);
     }
 
@@ -160,11 +160,11 @@ fn main() -> Result<()> {
     let backlight = find_backlight(cli.backlight.clone())?;
     match cli.command {
         Commands::Show => {
-            show_state(&backlight, &cli.wl_gammactl)?;
+            show_state(&backlight)?;
         }
         Commands::Set { value } => {
             let p = parse_percent(&value).context("parsing percent")?;
-            set_brightness(&backlight, &cli.wl_gammactl, p)?;
+            set_brightness(&backlight, p)?;
         }
         Commands::Up { step } => {
             let step = step
@@ -178,7 +178,7 @@ fn main() -> Result<()> {
             let current_hw = read_u32(&backlight.join("brightness"))?;
             let current_percent = (current_hw as f32) / (hw_upper as f32);
             let new = (current_percent + step_p).clamp(0.0, 1.0);
-            set_brightness(&backlight, &cli.wl_gammactl, new)?;
+            set_brightness(&backlight, new)?;
         }
         Commands::Down { step } => {
             let step = step
@@ -191,7 +191,7 @@ fn main() -> Result<()> {
             let current_hw = read_u32(&backlight.join("brightness"))?;
             let current_percent = (current_hw as f32) / (hw_upper as f32);
             let new = (current_percent - step_p).clamp(0.0, 1.0);
-            set_brightness(&backlight, &cli.wl_gammactl, new)?;
+            set_brightness(&backlight, new)?;
         }
     }
     Ok(())
