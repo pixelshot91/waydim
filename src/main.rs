@@ -12,7 +12,7 @@ const HW_MIN: u32 = 100;
 const HW_MAX: u32 = 1000;
 
 /// Minimum software factor to avoid invalid zero-gamma
-const MIN_SOFTWARE_FACTOR: f32 = 0.01;
+const MIN_SOFTWARE_FACTOR: f32 = 0.3;
 
 /// The gamma relay binary to control software gamma; this tool is required and not configurable.
 const WL_GAMMA_RELAY: &str = "wl-gammarelay-rs";
@@ -111,7 +111,7 @@ fn apply_software_gamma_delta(factor: f32) -> Result<()> {
 fn apply_software_brightness(factor: f32) -> Result<()> {
     let conn = Connection::new_session().context("connecting to DBus session bus")?;
     // clamp factor into [0.0, 1.0] and convert to DBus double
-    let factor = (factor.clamp(0.0, 1.0)) as f64;
+    let factor = (factor.clamp(MIN_SOFTWARE_FACTOR, 1.0)) as f64;
     // let factor = factor as f64;
 
     const WL_GAMMA_SERVICE: &str = "rs.wl-gammarelay";
