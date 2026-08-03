@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use dbus::blocking::stdintf::org_freedesktop_dbus::Properties as _;
+use dbus::blocking::Connection;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
 
 /// Clamp hardware brightness between these values (raw sysfs units).
 const HW_MIN: u32 = 100;
@@ -16,7 +18,11 @@ const MIN_SOFTWARE_FACTOR: f32 = 0.01;
 const WL_GAMMA_RELAY: &str = "wl-gammarelay-rs";
 
 #[derive(Parser)]
-#[command(author, version, about = "Hybrid hardware + software dimmer (Wayland-compatible)")]
+#[command(
+    author,
+    version,
+    about = "Hybrid hardware + software dimmer (Wayland-compatible)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -83,23 +89,44 @@ fn write_u32(path: &Path, value: u32) -> Result<()> {
     Ok(())
 }
 
-/// Apply software brightness via the wl-gammarelay daemon.
-/// factor: 1.0 is no change, <1.0 is darker.
-fn apply_software_gamma(factor: f32) -> Result<()> {
-    // clamp factor to a sane non-zero value
-    let factor = factor.max(MIN_SOFTWARE_FACTOR);
-    // Call wl-gammarelay-rs -c <factor>
-    let status = Command::new(WL_GAMMA_RELAY)
-        .arg("-c")
-        .arg(format!("{}", factor))
-        .status()
-        .with_context(|| format!("failed to run {}", WL_GAMMA_RELAY))?;
-    if !status.success() {
-        anyhow::bail!("{} exited with {}", WL_GAMMA_RELAY, status);
-    }
+fn apply_software_gamma_delta(factor: f32) -> Result<()> {
+    // clamp factor into [0.0, 1.0] and convert to DBus double
+    let factor = (factor.clamp(0.0, 1.0)) as f64;
+
+    // connect to the user session bus
+    let conn = Connection::new_session().context("connecting to DBus session bus")?;
+    const WL_GAMMA_SERVICE: &str = "rs.wl-gammarelay";
+    const WL_GAMMA_INTERFACE: &str = "rs.wl.gammarelay";
+    // short timeout for method call
+    let proxy = conn.with_proxy(WL_GAMMA_SERVICE, "/", Duration::from_millis(5000));
+
+    // Call Brighness(double)
+    proxy
+        .method_call::<(), _, _, _>(WL_GAMMA_INTERFACE, "UpdateBrightness", (factor,))
+        .with_context(|| format!("calling {}.Brighness", WL_GAMMA_SERVICE))?;
+
     Ok(())
 }
 
+fn apply_software_brightness(factor: f32) -> Result<()> {
+    let conn = Connection::new_session().context("connecting to DBus session bus")?;
+    // clamp factor into [0.0, 1.0] and convert to DBus double
+    let factor = (factor.clamp(0.0, 1.0)) as f64;
+    // let factor = factor as f64;
+
+    const WL_GAMMA_SERVICE: &str = "rs.wl-gammarelay";
+    const WL_GAMMA_INTERFACE: &str = "rs.wl.gammarelay";
+
+    let proxy = conn.with_proxy(WL_GAMMA_SERVICE, "/", Duration::from_millis(5000));
+
+    // The Properties trait allows direct calling of .set()
+    // Parameters: (interface_name, property_name, value)
+    proxy
+        .set(WL_GAMMA_INTERFACE, "Brightness", factor)
+        .with_context(|| format!("setting Brightness property on {}", WL_GAMMA_SERVICE))?;
+
+    Ok(())
+}
 fn show_state(backlight: &Path) -> Result<()> {
     let current = read_u32(&backlight.join("brightness"))?;
     let device_max = read_u32(&backlight.join("max_brightness"))?;
@@ -108,7 +135,10 @@ fn show_state(backlight: &Path) -> Result<()> {
     println!("device max_brightness: {}", device_max);
     println!("current hardware brightness: {}", current);
     // There is no easy portable way to read the current gamma factor from the relay; just tell user how to inspect
-    println!("software gamma: controlled by {} daemon; inspect the relay's logs or control interface.", WL_GAMMA_RELAY);
+    println!(
+        "software gamma: controlled by {} daemon; inspect the relay's logs or control interface.",
+        WL_GAMMA_RELAY
+    );
     println!("hardware clamp: [{}, {}] (raw units)", HW_MIN, HW_MAX);
     Ok(())
 }
@@ -126,7 +156,7 @@ fn set_brightness(backlight: &Path, target_percent: f32) -> Result<()> {
         // User wants "off" — set hardware to hw_lower and software factor to near-zero
         write_u32(&backlight.join("brightness"), hw_lower)?;
         // set software gamma to near-zero
-        apply_software_gamma(0.0)?;
+        apply_software_brightness(0.0)?;
         println!(
             "Requested 0: set hardware to {} and applied software gamma to 0 (via {}).",
             hw_lower, WL_GAMMA_RELAY
@@ -136,9 +166,9 @@ fn set_brightness(backlight: &Path, target_percent: f32) -> Result<()> {
 
     if desired_raw < hw_lower {
         // Hardware set to hw_lower, use software factor to reach desired_raw/hw_lower
-        write_u32(&backlight.join("brightness"), hw_lower)?;
+        apply_hardware_brightness(backlight, hw_lower)?;
         let factor = (desired_raw as f32) / (hw_lower as f32);
-        apply_software_gamma(factor)?;
+        apply_software_brightness(factor)?;
         println!(
             "hardware set to {} (clamped); applied software gamma factor {:.3}",
             hw_lower, factor
@@ -146,11 +176,41 @@ fn set_brightness(backlight: &Path, target_percent: f32) -> Result<()> {
     } else {
         // We can set hardware directly. If hw_upper < device_max, that just means we don't push full device brightness.
         let hw_value = desired_raw.min(hw_upper);
-        write_u32(&backlight.join("brightness"), hw_value)?;
+        apply_hardware_brightness(backlight, hw_lower)?;
+
         // Reset software gamma to 1.0 (no software dim)
-        apply_software_gamma(1.0)?;
+        apply_software_brightness(1.0)?;
         println!("hardware set to {}; software gamma reset to 1.0", hw_value);
     }
+
+    Ok(())
+}
+
+fn apply_hardware_brightness(
+    backlight: &Path,
+    hw_lower: u32,
+) -> std::prelude::v1::Result<(), anyhow::Error> {
+    write_u32(&backlight.join("brightness"), hw_lower)
+}
+
+fn set_backlight_brightness(brightness: u32) -> anyhow::Result<()> {
+    // 1. systemd-logind resides on the System Bus, not the Session Bus
+    let conn = Connection::new_system().context("connecting to DBus system bus")?;
+
+    const LOGIND_SERVICE: &str = "org.freedesktop.login1";
+    const LOGIND_PATH: &str = "/org/freedesktop/login1/session/auto";
+    const LOGIND_INTERFACE: &str = "org.freedesktop.login1.Session";
+
+    let proxy = conn.with_proxy(LOGIND_SERVICE, LOGIND_PATH, Duration::from_millis(5000));
+
+    // 2. Map signature 'ssu' to Rust tuple (&str, &str, u32)
+    proxy
+        .method_call::<(), _, _, _>(
+            LOGIND_INTERFACE,
+            "SetBrightness",
+            ("backlight", "intel_backlight", brightness),
+        )
+        .with_context(|| format!("failed to call SetBrightness on {}", LOGIND_SERVICE))?;
 
     Ok(())
 }
@@ -167,10 +227,7 @@ fn main() -> Result<()> {
             set_brightness(&backlight, p)?;
         }
         Commands::Up { step } => {
-            let step = step
-                .as_deref()
-                .unwrap_or("5")
-                .to_string();
+            let step = step.as_deref().unwrap_or("5").to_string();
             let step_p = parse_percent(&step)?;
             // read current approximate percent
             let device_max = read_u32(&backlight.join("max_brightness"))?;
@@ -181,10 +238,7 @@ fn main() -> Result<()> {
             set_brightness(&backlight, new)?;
         }
         Commands::Down { step } => {
-            let step = step
-                .as_deref()
-                .unwrap_or("5")
-                .to_string();
+            let step = step.as_deref().unwrap_or("5").to_string();
             let step_p = parse_percent(&step)?;
             let device_max = read_u32(&backlight.join("max_brightness"))?;
             let hw_upper = device_max.min(HW_MAX);
@@ -195,4 +249,30 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+#[cfg(test)]
+mod test {
+    use crate::*;
+
+    #[test]
+    fn test_software_brightness() {
+        apply_software_brightness(0.8).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        apply_software_brightness(1.0).unwrap();
+    }
+
+    #[test]
+    fn test_backlight_brightness() {
+        set_backlight_brightness(500).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        set_backlight_brightness(400).unwrap();
+    }
+
+    #[test]
+    fn test_brightness() {
+        let backlight = Path::new("/sys/class/backlight/intel_backlight");
+        set_brightness(backlight, 0.8).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        set_brightness(backlight, 1.0).unwrap();
+    }
 }
