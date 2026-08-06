@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::Context;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tarpc::tokio_serde::formats::Bincode;
 use tarpc::{client, context};
 use tokio::net::UnixStream;

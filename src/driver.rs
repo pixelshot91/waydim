@@ -1,7 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
 use dbus::blocking::stdintf::org_freedesktop_dbus::Properties as _;
 use dbus::blocking::Connection;
 use std::time::Duration;
+
+use crate::common::Nit;
+
+pub async fn get_brightness() -> Result<Nit> {
+    Nit::try_new(4.0)
+}
 
 pub fn set_software_brightness(factor: f32) -> Result<()> {
     let conn = Connection::new_session().context("connecting to DBus session bus")?;
@@ -16,14 +22,44 @@ pub fn set_software_brightness(factor: f32) -> Result<()> {
     const WL_GAMMA_INTERFACE: &str = "rs.wl.gammarelay";
 
     let proxy = conn.with_proxy(WL_GAMMA_SERVICE, "/", Duration::from_millis(5000));
-
-    // The Properties trait allows direct calling of .set()
-    // Parameters: (interface_name, property_name, value)
     proxy
         .set(WL_GAMMA_INTERFACE, "Brightness", factor)
         .with_context(|| format!("setting Brightness property on {}", WL_GAMMA_SERVICE))?;
 
     Ok(())
+}
+
+pub async fn get_software_brightness() -> Result<f64> {
+    // let conn = Connection::new_session().context("connecting to DBus session bus")?;
+
+    // const WL_GAMMA_SERVICE: &str = "rs.wl-gammarelay";
+    // const WL_GAMMA_INTERFACE: &str = "rs.wl.gammarelay";
+
+    // let proxy = conn.with_proxy(WL_GAMMA_SERVICE, "/", Duration::from_millis(5000));
+    // let brightness = proxy
+    //     .get(WL_GAMMA_INTERFACE, "Brightness")
+    //     .with_context(|| format!("setting Brightness property on {}", WL_GAMMA_SERVICE))?;
+
+    // Ok(brightness)
+
+    use zbus::{Connection, Proxy};
+    // 1. Establish an asynchronous connection to the User Session Bus
+    let connection = Connection::session().await?;
+
+    // 2. Create a proxy for the target DBus service, path, and interface
+    let proxy = Proxy::new(
+        &connection,
+        "rs.wl-gammarelay", // Destination service name
+        "/",                // Object path
+        "rs.wl.gammarelay", // Interface name
+    )
+    .await?;
+
+    // 3. Query the "Brightness" property, explicitly typing the output as f64 ('d')
+    let brightness: f64 = proxy.get_property("Brightness").await?;
+
+    println!("Brightness: {}", brightness);
+    Ok(brightness)
 }
 pub fn set_hardware_brightness(brightness: u32) -> anyhow::Result<()> {
     set_backlight_brightness(brightness)
@@ -89,7 +125,7 @@ fn apply_hardware_brightness(
 // }
 #[cfg(test)]
 mod test {
-    use crate::brightness_modifier::*;
+    use crate::driver::*;
 
     #[test]
     #[ignore = "Side-effect: really modify the software brightness"]

@@ -3,12 +3,19 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 use crate::brightness_mapper::BrightnessMapper;
-use crate::brightness_modifier;
+use crate::driver;
 
 // use crate::brightness_mapper::{BrightnessMapper, SamplePoint};
 // use crate::brightness_modifier::{set_hardware_brightness, set_software_brightness};
+
+#[derive(Serialize, Deserialize, Debug, Error)]
+pub enum WayDimAPIError {
+    #[error("Internal daemon error: {0}")]
+    Internal(String),
+}
 
 fn parse_nit(s: &str) -> Result<Nit> {
     let s = s.trim();
@@ -35,8 +42,8 @@ fn set_brightness(mapper: &BrightnessMapper, target_luminance: Nit) -> Result<()
 
     println!("Using {:?}", settings);
 
-    brightness_modifier::set_hardware_brightness(settings.hw)?;
-    brightness_modifier::set_software_brightness(settings.sw)?;
+    driver::set_hardware_brightness(settings.hw)?;
+    driver::set_software_brightness(settings.sw)?;
 
     Ok(())
 }

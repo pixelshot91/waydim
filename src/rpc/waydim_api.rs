@@ -1,6 +1,9 @@
-use crate::common::Nit;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::common::{Nit, WayDimAPIError};
 
 #[tarpc::service]
 pub trait WayDimAPI {
-    async fn get_brightness() -> Nit;
+    async fn get_brightness() -> Result<Nit, WayDimAPIError>;
 }
