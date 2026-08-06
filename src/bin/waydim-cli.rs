@@ -21,7 +21,7 @@ enum Commands {
     /// Get the brightness state
     Get {},
     /// Set the brightness state
-    Set {},
+    Set { nit: f64 },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -36,9 +36,23 @@ async fn main() -> color_eyre::Result<()> {
     let transport = tarpc::serde_transport::new(codec_builder.new_framed(conn), Bincode::default());
     let client = WayDimAPIClient::new(client::Config::default(), transport).spawn();
 
-    let res = client.get_brightness(context::current()).await?;
+    // let res = client.get_brightness(context::current()).await?;
 
-    dbg!(res);
+    match args.command {
+        Commands::Get {} => {
+            let res = client.get_brightness(context::current()).await?;
+            dbg!(&res);
+        }
+        Commands::Set { nit } => {
+            let res = client
+                .set_brightness(
+                    context::current(),
+                    waydim::common::Nit::try_new(nit).unwrap(),
+                )
+                .await?;
+            dbg!(&res);
+        }
+    };
 
     return Ok(());
 }

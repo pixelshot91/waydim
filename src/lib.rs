@@ -1,5 +1,5 @@
 mod brightness_mapper;
+pub mod common;
 mod driver;
-mod common;
 pub mod rpc;
 pub mod telemetry;

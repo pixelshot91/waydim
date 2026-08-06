@@ -3,15 +3,15 @@ use crate::common::Nit;
 /// Represents a calibration measurement point from a photometer.
 #[derive(Debug, Clone, Copy)]
 pub struct SamplePoint {
-    pub sw: f32,
+    pub sw: f64,
     pub hw: u32,
-    pub nits: f32,
+    pub nits: f64,
 }
 
 /// Output settings for display brightness control.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BrightnessSetting {
-    pub sw: f32,
+    pub sw: f64,
     pub hw: u32,
 }
 
@@ -20,9 +20,9 @@ pub struct BrightnessMapper {
     /// Calibration samples for hw > 1 (sw = 1.0), sorted by nits ascending.
     hw_samples: Vec<SamplePoint>,
     /// Luminance in nits at hw = 1, sw = 1.0 (typically 2.0 nits given 0.5 sw = 1.0 nit).
-    min_hw_nits: f32,
+    min_hw_nits: f64,
     /// Maximum achievable luminance at max hw and sw = 1.0.
-    max_nits: f32,
+    max_nits: f64,
 }
 
 impl BrightnessMapper {
@@ -38,7 +38,7 @@ impl BrightnessMapper {
 
         let min_hw_nits = samples
             .iter()
-            .find(|s| s.hw == 1 && (s.sw - 1.0).abs() < f32::EPSILON)
+            .find(|s| s.hw == 1 && (s.sw - 1.0).abs() < f64::EPSILON)
             .map(|s| s.nits)
             .unwrap_or(2.0); // Derived from sw=0.5 -> 1.0 nit invariant
 
@@ -84,7 +84,7 @@ impl BrightnessMapper {
 
             // Linear interpolation in log-space or linear-space for hw register
             let t = (target_nits.0 - p0.nits) / (p1.nits - p0.nits);
-            let hw_interpolated = p0.hw as f32 + t * (p1.hw as f32 - p0.hw as f32);
+            let hw_interpolated = p0.hw as f64 + t * (p1.hw as f64 - p0.hw as f64);
 
             BrightnessSetting {
                 sw: 1.0,

@@ -5,15 +5,11 @@ use std::time::Duration;
 
 use crate::common::Nit;
 
-pub async fn get_brightness() -> Result<Nit> {
-    Nit::try_new(4.0)
-}
-
-pub fn set_software_brightness(factor: f32) -> Result<()> {
+pub fn set_software_brightness(factor: f64) -> Result<()> {
     let conn = Connection::new_session().context("connecting to DBus session bus")?;
 
     /// Minimum software factor to avoid invalid zero-gamma
-    const MIN_SOFTWARE_FACTOR: f32 = 0.3;
+    const MIN_SOFTWARE_FACTOR: f64 = 0.3;
     // clamp factor into [0.0, 1.0] and convert to DBus double
     let factor = (factor.clamp(MIN_SOFTWARE_FACTOR, 1.0)) as f64;
     // let factor = factor as f64;
@@ -152,7 +148,7 @@ mod test {
     //     set_brightness(backlight, 1.0).unwrap();
     // }
 }
-// fn apply_software_gamma_delta(factor: f32) -> Result<()> {
+// fn apply_software_gamma_delta(factor: f64) -> Result<()> {
 //     // clamp factor into [0.0, 1.0] and convert to DBus double
 //     let factor = (factor.clamp(0.0, 1.0)) as f64;
 

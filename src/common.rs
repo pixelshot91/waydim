@@ -37,7 +37,11 @@ fn find_backlight(explicit: Option<PathBuf>) -> Result<PathBuf> {
     anyhow::bail!("no backlight device found under /sys/class/backlight");
 }
 
-fn set_brightness(mapper: &BrightnessMapper, target_luminance: Nit) -> Result<()> {
+pub async fn get_brightness() -> Result<Nit> {
+    Nit::try_new(4.0)
+}
+
+pub fn set_brightness(mapper: &BrightnessMapper, target_luminance: Nit) -> Result<()> {
     let settings = mapper.nits_to_setting(target_luminance);
 
     println!("Using {:?}", settings);
@@ -50,9 +54,9 @@ fn set_brightness(mapper: &BrightnessMapper, target_luminance: Nit) -> Result<()
 
 // Luminance in nits (cd/m2)
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Nit(pub f32);
+pub struct Nit(pub f64);
 impl Nit {
-    pub fn try_new(v: f32) -> Result<Self> {
+    pub fn try_new(v: f64) -> Result<Self> {
         if v <= 0.0 {
             return Err(anyhow::anyhow!("A luminance is always positive"));
         }
