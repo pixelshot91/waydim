@@ -1,4 +1,4 @@
-use crate::Nit;
+use crate::common::Nit;
 
 /// Represents a calibration measurement point from a photometer.
 #[derive(Debug, Clone, Copy)]

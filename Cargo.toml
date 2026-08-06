@@ -6,6 +6,35 @@ authors = ["pixelshot91"]
 
 [dependencies]
 clap = { version = "4.3", features = ["derive"] }
+
 anyhow = "1.0"
 thiserror = "1.0"
+color-eyre = "0.6.5"
+fs-err = "3.3.0"
+
 dbus = { version = "0.9" }
+tarpc = { version = "0.37.0", features = ["full"] }
+tokio = { version = "1.53.1", features = [
+    "process",
+    "rt",
+    "time",
+    "sync",
+    "macros",
+    "rt-multi-thread",
+] }
+serde = { version = "1.0.229", features = ["derive"] }
+
+
+opentelemetry-otlp = { version = "0.31.0", default-features = false, features = [
+    "metrics",
+    "logs",
+    "trace",
+    "grpc-tonic",
+] }
+opentelemetry = "0.31.0"
+opentelemetry_sdk = "0.31.0"
+opentelemetry-appender-tracing = "0.31.1"
+tracing = { version = "0.1.44", features = ["log-always"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.32.1"
+futures = "0.3.33"
